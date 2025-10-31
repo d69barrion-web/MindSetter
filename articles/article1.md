@@ -2,7 +2,7 @@
 title: Pagod, Pera, at Pananaw
 author: Daniel Barrion
 author_image: https://d69barrion-web.github.io/images/daniel.jpg
-image: arrImg.jpg
+image: srtImg.jpg
 ---
 
 # Ang Maling Paniniwala sa "Trabaho Para Yumaman"
