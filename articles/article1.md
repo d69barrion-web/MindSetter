@@ -1,7 +1,8 @@
 ---
-title: Pagod Pera at Pananaw (Mindset)
-pen name: Boy Isip
-image: daniel_abalos.jpg
+title: Pagod, Pera, at Pananaw
+author: Daniel Barrion
+author_image: https://ion-web.github.io/images/daniel.jpg
+image: https://ion-web.github.io/images/header.jpg
 ---
 
 # Ang Maling Paniniwala sa "Trabaho Para Yumaman"
