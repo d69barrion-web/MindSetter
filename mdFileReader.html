@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="tl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Article Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* light-mode only */
+    :root { color-scheme: light; }
+    body { background: #ffffff; color: #0f172a; }
+    .author-avatar { width:64px; height:64px; border-radius:9999px; object-fit:cover; }
+    .hero-image { width:100%; height:auto; max-height:40vh; object-fit:cover; border-radius:8px; }
+    .buttons-row { display:flex; justify-content:space-between; gap:12px; margin-top:1.25rem; }
+    .btn { padding:0.5rem 0.9rem; border-radius:8px; font-weight:600; box-shadow:0 1px 2px rgba(2,6,23,0.06); }
+    .btn:disabled { opacity:0.5; cursor:not-allowed; }
+    /* mobile friendly content width */
+    .container { max-width:900px; margin:0 auto; padding:16px; }
+    .comments { margin-top:1.5rem; }
+    .comment { border-radius:8px; padding:10px; background:#f8fafc; margin-bottom:8px; }
+    .reply { margin-left:48px; }
+    .author-line { display:flex; align-items:center; gap:12px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <div id="topbar" class="flex items-center justify-between py-3">
+      <div class="text-lg font-semibold">Article Viewer</div>
+      <div id="auth-area" class="flex items-center gap-3">
+        <button id="signin-btn" class="btn border">Sign in with Google</button>
+        <button id="signout-btn" class="btn border hidden">Sign out</button>
+        <img id="user-photo" class="hidden author-avatar" alt="user photo" />
+      </div>
+    </div>
+
+    <article id="article" class="mt-3">
+      <img id="hero" class="hero-image hidden" alt="article image" />
+      <h1 id="title" class="text-2xl font-bold mt-4"></h1>
+
+      <div id="author" class="flex items-center gap-3 mt-3 hidden">
+        <img id="author-avatar" class="author-avatar" alt="author" />
+        <div>
+          <div id="pen-name" class="font-semibold"></div>
+        </div>
+      </div>
+
+      <div id="content" class="prose mt-6 max-w-full"></div>
+
+      <div class="buttons-row" style="align-items:center">
+        <button id="prev-btn" class="btn border" onclick="goPrev()">&larr; Previous</button>
+        <button id="next-btn" class="btn border" onclick="goNext()">Next &rarr;</button>
+      </div>
+
+      <section id="comments-section" class="comments">
+        <h2 class="text-lg font-semibold mt-6">Comments</h2>
+        <div id="comment-box" class="mt-3">
+          <div id="signed-out-comment" class="text-sm text-slate-600">Please sign in with Google to leave a comment.</div>
+          <div id="new-comment-area" class="hidden">
+            <textarea id="comment-input" rows="3" class="w-full border p-2 rounded mt-2" placeholder="Write a comment..."></textarea>
+            <div class="flex justify-end mt-2">
+              <button id="post-comment" class="btn border">Post comment</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="comments-list" class="mt-4"></div>
+      </section>
+    </article>
+
+    <footer class="text-xs text-slate-500 mt-8 pb-8">Built for mobile — light mode only.</footer>
+  </main>
+
+  <script>
+    /*************************************************************************
+     * Simple Article Viewer
+     * - Fetches a .md file that has YAML front matter
+     * - Expects front matter fields: title, image, pen_name, pen_avatar (optional)
+     * - For Previous/Next navigation it first looks for "articles.json" in same folder
+     *   which should be an ordered array of html filenames (e.g. ["a.html","b.html"]).
+     * - Comments use Firebase Auth (Google) and Firestore. You must paste your firebaseConfig.
+     *************************************************************************/
+
+    // --- Utilities ---
+    function nv(str){ return str===null||str===undefined? '': String(str); }
+    function basename(path){ return path.split('/').pop(); }
+    function filenameNoExt(name){ return name.replace(/\.[^.]+$/, ''); }
+
+    // detect current html and corresponding md
+    const currentHtml = basename(location.pathname || 'index.html') || 'index.html';
+    const mdName = filenameNoExt(currentHtml) + '.md';
+
+    const heroEl = document.getElementById('hero');
+    const titleEl = document.getElementById('title');
+    const authorBlock = document.getElementById('author');
+    const authorAvatar = document.getElementById('author-avatar');
+    const penNameEl = document.getElementById('pen-name');
+    const contentEl = document.getElementById('content');
+
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+
+    let articlesList = null; // ordered array of html filenames
+
+    async function fetchArticlesManifest(){
+      try{
+        const r = await fetch('articles.json', {cache: 'no-store'});
+        if(!r.ok) throw new Error('no-manifest');
+        const j = await r.json();
+        if(Array.isArray(j)) articlesList = j;
+      }catch(e){
+        // manifest missing; we'll keep buttons hidden
+        console.info('articles.json not found or invalid — prev/next disabled unless manifest provided');
+      }
+    }
+
+    function updateNavButtons(){
+      if(!articlesList){ prevBtn.style.display='none'; nextBtn.style.display='none'; return; }
+      const idx = articlesList.indexOf(currentHtml);
+      if(idx === -1){ prevBtn.style.display='none'; nextBtn.style.display='none'; return; }
+      if(idx > 0){ prevBtn.style.display='inline-block'; prevBtn.dataset.target = articlesList[idx-1]; } else prevBtn.style.display='none';
+      if(idx < articlesList.length-1){ nextBtn.style.display='inline-block'; nextBtn.dataset.target = articlesList[idx+1]; } else nextBtn.style.display='none';
+    }
+
+    function goPrev(){ const t = prevBtn.dataset.target; if(t) location.href = t; }
+    function goNext(){ const t = nextBtn.dataset.target; if(t) location.href = t; }
+
+    // --- front matter parser (simple) ---
+    function parseFrontMatter(md){
+      // captures yaml front matter between --- and --- at top
+      const fmRegex = /^---\s*([\s\S]*?)\s*---\s*/;
+      const m = md.match(fmRegex);
+      let fm = {};
+      let body = md;
+      if(m){
+        const yaml = m[1];
+        body = md.slice(m[0].length);
+        // parse simple key: value lines
+        const lines = yaml.split(/\r?\n/);
+        for(const line of lines){
+          const kv = line.match(/^([\w\- ]+):\s*(.*)$/);
+          if(kv){
+            const key = kv[1].trim();
+            let val = kv[2].trim();
+            // remove surrounding quotes if any
+            if((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))){
+              val = val.slice(1,-1);
+            }
+            fm[key] = val;
+          }
+        }
+      }
+      return {fm, body};
+    }
+
+    async function loadArticle(){
+      try{
+        const resp = await fetch(mdName);
+        if(!resp.ok) throw new Error('md-not-found');
+        const txt = await resp.text();
+        const {fm, body} = parseFrontMatter(txt);
+
+        // title
+        if(fm.title){ titleEl.textContent = fm.title; }
+
+        // hero image
+        if(fm.image){ heroEl.src = fm.image; heroEl.alt = fm.title || 'article image'; heroEl.classList.remove('hidden'); }
+
+        // author avatar & pen name
+        const pen = fm['pen_name'] || fm['pen-name'] || fm['pen name'] || fm.author || fm.Author || '';
+        const avatarCandidate = fm['pen_avatar'] || fm['pen-avatar'] || fm['pen avatar'] || fm['author_image'] || fm['author-image'] || fm['author image'] || '';
+        if(pen || avatarCandidate){
+          penNameEl.textContent = pen || '';
+          if(avatarCandidate && (avatarCandidate.startsWith('http') || avatarCandidate.startsWith('/'))){
+            authorAvatar.src = avatarCandidate; authorAvatar.alt = pen || 'author'; authorBlock.classList.remove('hidden');
+          } else if(pen){
+            // create initials avatar
+            const initials = pen.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+            // generate a simple data URL svg
+            const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128'><rect width='100%' height='100%' fill='%23eef2ff'/><text x='50%' y='52%' font-size='48' text-anchor='middle' fill='%23022c6e' font-family='Arial' dy='.35em'>${initials}</text></svg>`;
+            authorAvatar.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+            authorBlock.classList.remove('hidden');
+          }
+        }
+
+        // render body
+        contentEl.innerHTML = marked.parse(body);
+
+        // update comments area ready (will initialize firebase after load)
+      }catch(e){
+        titleEl.textContent = 'Article not found';
+        contentEl.innerHTML = '<p class="text-slate-600">Could not load the .md file: ' + mdName + '</p>';
+        console.error(e);
+      }
+    }
+
+    /***********************
+     * Firebase Comments
+     * Replace firebaseConfig below with your project's config
+     ***********************/
+    // You MUST replace the following config with your Firebase project's config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "SENDER_ID",
+      appId: "APP_ID"
+    };
+
+    // load firebase scripts dynamically
+    async function loadFirebase(){
+      // simple check: if user left default config, skip loading to avoid console errors
+      if(!firebaseConfig || firebaseConfig.apiKey === 'YOUR_API_KEY'){
+        console.info('Firebase config not set. Comments will not work until you paste your firebaseConfig in the HTML file.');
+        return;
+      }
+      await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
+      await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
+      await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
+      // init
+      firebase.initializeApp(firebaseConfig);
+      window.auth = firebase.auth();
+      window.db = firebase.firestore();
+      setupAuthUI();
+      setupCommentsRealtime();
+    }
+
+    function loadScript(src){ return new Promise((res, rej) =>{
+      const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+    }); }
+
+    // --- Auth UI ---
+    const signinBtn = document.getElementById('signin-btn');
+    const signoutBtn = document.getElementById('signout-btn');
+    const userPhoto = document.getElementById('user-photo');
+
+    function setupAuthUI(){
+      signinBtn.addEventListener('click', async ()=>{
+        const provider = new firebase.auth.GoogleAuthProvider();
+        try{
+          await auth.signInWithPopup(provider);
+        }catch(e){ console.error(e); alert('Sign in failed: ' + e.message); }
+      });
+      signoutBtn.addEventListener('click', async ()=>{ await auth.signOut(); });
+
+      auth.onAuthStateChanged(user =>{
+        if(user){
+          signinBtn.classList.add('hidden'); signoutBtn.classList.remove('hidden'); userPhoto.classList.remove('hidden');
+          userPhoto.src = user.photoURL || '';
+          document.getElementById('signed-out-comment').classList.add('hidden');
+          document.getElementById('new-comment-area').classList.remove('hidden');
+        } else {
+          signinBtn.classList.remove('hidden'); signoutBtn.classList.add('hidden'); userPhoto.classList.add('hidden');
+          document.getElementById('signed-out-comment').classList.remove('hidden');
+          document.getElementById('new-comment-area').classList.add('hidden');
+        }
+      });
+    }
+
+    // --- Comments logic ---
+    const postBtn = document.getElementById('post-comment');
+    const commentInput = document.getElementById('comment-input');
+    const commentsList = document.getElementById('comments-list');
+
+    function articleSlug(){ return filenameNoExt(currentHtml); }
+
+    async function postComment(parentId=null){
+      if(!auth || !auth.currentUser){ alert('Please sign in first.'); return; }
+      const text = commentInput.value.trim(); if(!text) return;
+      const doc = {
+        article: articleSlug(),
+        parent: parentId,
+        text: text,
+        uid: auth.currentUser.uid,
+        authorName: auth.currentUser.displayName || 'Anonymous',
+        authorPhoto: auth.currentUser.photoURL || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      try{
+        await db.collection('comments').add(doc);
+        commentInput.value = '';
+      }catch(e){ console.error(e); alert('Could not post comment: ' + e.message); }
+    }
+
+    postBtn.addEventListener('click', ()=> postComment(null));
+
+    // render comment item
+    function renderCommentItem(c){
+      const div = document.createElement('div'); div.className = 'comment';
+      div.dataset.id = c.id;
+      const header = document.createElement('div'); header.className = 'flex items-center gap-3';
+      const img = document.createElement('img'); img.className = 'author-avatar'; img.src = c.authorPhoto || '';
+      img.alt = c.authorName || 'user';
+      const meta = document.createElement('div');
+      meta.innerHTML = `<div class="font-semibold">${escapeHtml(c.authorName || '')}</div><div class="text-xs text-slate-500">${c.ts}</div>`;
+      header.appendChild(img); header.appendChild(meta);
+      const body = document.createElement('div'); body.className = 'mt-2'; body.textContent = c.text;
+      const actions = document.createElement('div'); actions.className = 'mt-2 flex gap-2';
+      const replyBtn = document.createElement('button'); replyBtn.className='btn border text-sm'; replyBtn.textContent = 'Reply';
+      replyBtn.addEventListener('click', ()=> showReplyForm(c.id, div));
+      actions.appendChild(replyBtn);
+      div.appendChild(header); div.appendChild(body); div.appendChild(actions);
+      // replies container
+      const repliesContainer = document.createElement('div'); repliesContainer.className = 'mt-3'; div.appendChild(repliesContainer);
+      return {el: div, repliesContainer};
+    }
+
+    function escapeHtml(s){ return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    function showReplyForm(parentId, container){
+      if(!auth || !auth.currentUser){ alert('Please sign in to reply.'); return; }
+      // avoid duplicate forms
+      if(container.querySelector('.reply-form')) return;
+      const f = document.createElement('div'); f.className = 'reply-form mt-2';
+      f.innerHTML = `<textarea rows="2" class="w-full border p-2 rounded" placeholder="Write a reply..."></textarea><div class="flex justify-end mt-2"><button class="btn border post-reply">Post Reply</button></div>`;
+      container.appendChild(f);
+      f.querySelector('.post-reply').addEventListener('click', async ()=>{
+        const txt = f.querySelector('textarea').value.trim(); if(!txt) return;
+        try{
+          await db.collection('comments').add({ article: articleSlug(), parent: parentId, text: txt, uid: auth.currentUser.uid, authorName: auth.currentUser.displayName, authorPhoto: auth.currentUser.photoURL, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+          f.remove();
+        }catch(e){ console.error(e); alert('Could not post reply: ' + e.message); }
+      });
+    }
+
+    // realtime listener to comments for this article
+    function setupCommentsRealtime(){
+      if(!db) return;
+      db.collection('comments').where('article','==', articleSlug()).orderBy('createdAt','asc').onSnapshot(snap=>{
+        // build a map by id and parent
+        const items = [];
+        const byId = {};
+        snap.forEach(doc=>{
+          const d = doc.data();
+          const ts = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toLocaleString() : '';
+          const obj = { id: doc.id, text: d.text, parent: d.parent || null, authorName: d.authorName, authorPhoto: d.authorPhoto, ts };
+          byId[doc.id] = obj; items.push(obj);
+        });
+        // clear and re-render as tree
+        commentsList.innerHTML = '';
+        const roots = items.filter(i=>!i.parent);
+        for(const r of roots){
+          const {el, repliesContainer} = renderCommentItem(r);
+          commentsList.appendChild(el);
+          // append replies
+          const replies = items.filter(i=>i.parent === r.id);
+          for(const rp of replies){
+            const child = renderCommentItem(rp).el; child.classList.add('reply');
+            repliesContainer.appendChild(child);
+          }
+        }
+      }, err=>{ console.error('comments listen error', err); });
+    }
+
+    // init sequence
+    (async function(){
+      await fetchArticlesManifest();
+      updateNavButtons();
+      await loadArticle();
+      // load firebase only after article loads
+      await loadFirebase();
+    })();
+
+  </script>
+</body>
+</html>
