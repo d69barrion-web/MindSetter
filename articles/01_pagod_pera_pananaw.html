@@ -1,39 +1,100 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="tl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Article Viewer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <style>
-    /* light-mode only */
-    :root { color-scheme: light; }
-    body { background: #ffffff; color: #0f172a; }
-    .author-avatar { width:64px; height:64px; border-radius:9999px; object-fit:cover; }
-    .hero-image { width:100%; height:auto; max-height:40vh; object-fit:cover; border-radius:8px; }
-    .buttons-row { display:flex; justify-content:space-between; gap:12px; margin-top:1.25rem; }
-    .btn { padding:0.5rem 0.9rem; border-radius:8px; font-weight:600; box-shadow:0 1px 2px rgba(2,6,23,0.06); }
-    .btn:disabled { opacity:0.5; cursor:not-allowed; }
-    /* mobile friendly content width */
-    .container { max-width:900px; margin:0 auto; padding:16px; }
-    .comments { margin-top:1.5rem; }
-    .comment { border-radius:8px; padding:10px; background:#f8fafc; margin-bottom:8px; }
-    .reply { margin-left:48px; }
-    .author-line { display:flex; align-items:center; gap:12px; }
-    .hidden { display:none !important; }
-  </style>
 </head>
-<body>
-  <main class="container">
-    <div id="topbar" class="flex items-center justify-between py-3">
-      <div class="text-lg font-semibold">Article Viewer</div>
-      <div id="auth-area" class="flex items-center gap-3">
-        <button id="signin-btn" class="btn border">Sign in with Google</button>
-        <button id="signout-btn" class="btn border hidden">Sign out</button>
-        <img id="user-photo" class="hidden author-avatar" alt="user photo" />
+<body class="bg-gray-50 text-gray-800">
+  <main class="max-w-3xl mx-auto p-4">
+    <div id="article" class="bg-white shadow-lg rounded-2xl overflow-hidden">
+      <div id="image-container" class="relative">
+        <img id="article-image" class="w-full h-56 object-cover" alt="Article Image" />
+        <div class="absolute bottom-0 left-0 bg-black/60 text-white text-sm px-3 py-1 rounded-tr-xl">
+          <span id="pen-name"></span>
+        </div>
+      </div>
+      <div class="p-6">
+        <h1 id="article-title" class="text-2xl font-bold mb-4"></h1>
+        <div id="article-body" class="prose prose-sm sm:prose-base max-w-none"></div>
       </div>
     </div>
+
+    <div class="flex justify-between mt-6">
+      <button id="prevBtn" class="px-4 py-2 bg-gray-200 rounded-xl text-gray-600 hover:bg-gray-300">Previous</button>
+      <button id="nextBtn" class="px-4 py-2 bg-gray-200 rounded-xl text-gray-600 hover:bg-gray-300">Next</button>
+    </div>
+  </main>
+
+  <script>
+    const repoOwner = "d69barrion-web";
+    const repoName = "MindSetter";
+    const basePath = "articles";
+
+    async function loadSingleArticle() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const folderName = urlParams.get("folder");
+      const fileIndex = parseInt(urlParams.get("index") || 0);
+
+      if (!folderName) {
+        document.getElementById("article-body").innerHTML = "<p>⚠️ Walang folder na tinukoy.</p>";
+        return;
+      }
+
+      try {
+        const folderApi = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${basePath}/${encodeURIComponent(folderName)}`;
+        const files = await (await fetch(folderApi)).json();
+        const mdFiles = files.filter(f => f.name.toLowerCase().endsWith(".md")).sort((a,b)=>a.name.localeCompare(b.name));
+
+        if (mdFiles.length === 0) {
+          document.getElementById("article-body").innerHTML = "<p>Walang markdown file na nahanap.</p>";
+          return;
+        }
+
+        const currentFile = mdFiles[fileIndex];
+        const fileText = await (await fetch(currentFile.download_url)).text();
+
+        const fmMatch = fileText.match(/^---\s*([\s\S]*?)\s*---/);
+        let metadata = {};
+        let body = fileText;
+        if (fmMatch) {
+          const fm = fmMatch[1].trim();
+          body = fileText.replace(fmMatch[0], "").trim();
+          fm.split(/\r?\n/).forEach(line => {
+            const [k, ...rest] = line.split(":");
+            if (!k) return;
+            const key = k.trim().toLowerCase();
+            const val = rest.join(":").trim();
+            metadata[key] = val;
+          });
+        }
+
+        document.getElementById("article-title").innerText = metadata.title || currentFile.name.replace(".md","");
+        document.getElementById("pen-name").innerText = metadata["pen name"] || "Anonymous";
+        document.getElementById("article-image").src = metadata.image 
+          ? `https://raw.githubusercontent.com/${repoOwner}/${repoName}/main/Images/Articles/${metadata.image}`
+          : "https://placehold.co/800x400?text=No+Image";
+        document.getElementById("article-body").innerHTML = marked.parse(body);
+
+        // Control buttons
+        const prevBtn = document.getElementById("prevBtn");
+        const nextBtn = document.getElementById("nextBtn");
+        prevBtn.disabled = (fileIndex <= 0);
+        nextBtn.disabled = (fileIndex >= mdFiles.length - 1);
+        prevBtn.onclick = () => window.location.href = `?folder=${folderName}&index=${fileIndex - 1}`;
+        nextBtn.onclick = () => window.location.href = `?folder=${folderName}&index=${fileIndex + 1}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("article-body").innerHTML = "<p>❌ Hindi ma-load ang artikulo.</p>";
+      }
+    }
+
+    loadSingleArticle();
+  </script>
+</body>
+</html>
 
     <article id="article" class="mt-3">
       <img id="hero" class="hero-image hidden" alt="article image" />
