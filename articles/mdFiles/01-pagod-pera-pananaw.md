@@ -1,7 +1,6 @@
 ---
 title: Pagod, Pera, at Pananaw
-author: Daniel Barrion
-author_image: https://d69barrion-web.github.io/images/daniel.jpg
+pen name: Daniel Barrion
 image: srtImg.jpg
 ---
 
