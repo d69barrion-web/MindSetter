@@ -1,5 +1,5 @@
 ---
-title: Pagod, Pera, at Pananaw
+title: 01_pagod_pera_pananaw
 pen name: Daniel Barrion
 image: srtImg.jpg
 ---
