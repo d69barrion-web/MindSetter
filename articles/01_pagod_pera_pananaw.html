@@ -156,7 +156,7 @@
 
     async function loadArticle(){
       try{
-        const resp = await fetch('mdFiles/' + mdName);
+        const resp = await fetch(mdName);
         if(!resp.ok) throw new Error('md-not-found');
         const txt = await resp.text();
         const {fm, body} = parseFrontMatter(txt);
